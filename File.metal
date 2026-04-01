@@ -8,13 +8,18 @@
 #include <metal_stdlib>
 using namespace metal;
 
-kernel void vec_add(
+kernel void matvec_naive(
                     device const float* A [[ buffer(0) ]],
-                    device const float* B [[ buffer(1) ]],
-                    device float* C [[ buffer(2) ]],
+                    device const float* x [[ buffer(1) ]],
+                    device float* y [[ buffer(2) ]],
+                    constant uint& K [[ buffer(3) ]],
                     uint id [[ thread_position_in_grid ]])
 {
-    C[id] = A[id] + B[id];
+    float sum = 0.0f;
+    for (uint j = 0; j < K; j++){
+        sum += A[id * K + j] * x[j];
+    }
+    y[id] = sum;
 }
 
 
