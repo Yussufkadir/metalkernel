@@ -22,6 +22,8 @@ int main() {
         [library newFunctionWithName:@"matvec_tiled"];
     id<MTLFunction> func_coalesced =
         [library newFunctionWithName:@"matvec_coalesced"];
+    id<MTLFunction> func_simdgroup =
+        [library newFunctionWithName:@"matvec_simdgroup"];
 
     id<MTLComputePipelineState> pipeline_naive =
         [device newComputePipelineStateWithFunction:func_naive
@@ -31,6 +33,9 @@ int main() {
                                              error:&error];
     id<MTLComputePipelineState> pipeline_coalesced =
         [device newComputePipelineStateWithFunction:func_coalesced
+                                             error:&error];
+    id<MTLComputePipelineState> pipeline_simdgroup =
+        [device newComputePipelineStateWithFunction:func_simdgroup
                                              error:&error];
 
     id<MTLCommandQueue> queue = [device newCommandQueue];
@@ -64,7 +69,8 @@ int main() {
 
     auto benchmark = [&](id<MTLComputePipelineState> pipeline,
                          NSString* name,
-                         int mode) {
+                         int mode,
+                         size_t tg_memory_bytes) {
 
         auto run_once = [&]() {
             id<MTLCommandBuffer> cmd = [queue commandBuffer];
@@ -76,20 +82,18 @@ int main() {
             [enc setBuffer:bufY offset:0 atIndex:2];
             [enc setBuffer:bufK offset:0 atIndex:3];
 
+            if (tg_memory_bytes > 0) {
+                [enc setThreadgroupMemoryLength:tg_memory_bytes
+                                       atIndex:0];
+            }
+
             MTLSize grid  = MTLSizeMake(M, 1, 1);
             MTLSize group = MTLSizeMake(GROUP_SIZE, 1, 1);
 
             if (mode == 0) {
-                if (mode == 0 && pipeline == pipeline_tiled) {
-                    [enc setThreadgroupMemoryLength:TILE * sizeof(float)
-                                           atIndex:0];
-                }
                 [enc dispatchThreads:grid
                     threadsPerThreadgroup:group];
-
             } else {
-                [enc setThreadgroupMemoryLength:GROUP_SIZE * sizeof(float)
-                                       atIndex:0];
                 [enc dispatchThreadgroups:grid
                      threadsPerThreadgroup:group];
             }
@@ -123,9 +127,24 @@ int main() {
         NSLog(@"  max error:   %f",       max_err);
     };
 
-    benchmark(pipeline_naive,     @"matvec_naive",     0);
-    benchmark(pipeline_tiled,     @"matvec_tiled",     0);
-    benchmark(pipeline_coalesced, @"matvec_coalesced", 1);
+    benchmark(pipeline_naive,
+              @"matvec_naive",
+              0,
+              0);
 
+    benchmark(pipeline_tiled,
+              @"matvec_tiled",
+              0,
+              TILE * sizeof(float));
+
+    benchmark(pipeline_coalesced,
+              @"matvec_coalesced",
+              1,
+              GROUP_SIZE * sizeof(float));
+
+    benchmark(pipeline_simdgroup,
+              @"matvec_simdgroup",
+              1,
+              (GROUP_SIZE / 32) * sizeof(float));
     return 0;
 }

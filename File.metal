@@ -73,3 +73,35 @@ kernel void matvec_coalesced(
         y[row] = partial[0];
     }
 }
+
+kernel void matvec_simdgroup(
+    device const float* A       [[ buffer(0) ]],
+    device const float* x       [[ buffer(1) ]],
+    device float*       y       [[ buffer(2) ]],
+    constant uint&      K       [[ buffer(3) ]],
+    threadgroup float*  partial [[ threadgroup(0) ]],
+    uint row      [[ threadgroup_position_in_grid ]],
+    uint local_id [[ thread_position_in_threadgroup ]],
+    uint gsize    [[ threads_per_threadgroup ]])
+{
+    const uint SGSIZE = 32;
+
+    float sum = 0.0f;
+    for (uint j = local_id; j < K; j += gsize) {
+        sum += A[row * K + j] * x[j];
+    }
+
+    sum = simd_sum(sum);
+
+    if (local_id % SGSIZE == 0) {
+        partial[local_id / SGSIZE] = sum;
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    if (local_id == 0) {
+        float total = 0.0f;
+        uint n_simds = gsize / SGSIZE;
+        for (uint i = 0; i < n_simds; i++) total += partial[i];
+        y[row] = total;
+    }
+}
