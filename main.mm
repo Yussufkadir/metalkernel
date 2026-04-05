@@ -24,6 +24,12 @@ int main() {
         [library newFunctionWithName:@"matvec_coalesced"];
     id<MTLFunction> func_simdgroup =
         [library newFunctionWithName:@"matvec_simdgroup"];
+    id<MTLFunction> func_float4 =
+        [library newFunctionWithName:@"matvec_float4"];
+    id<MTLFunction> func_cached =
+        [library newFunctionWithName:@"matvec_cached"];
+    id<MTLFunction> func_half =
+        [library newFunctionWithName:@"matvec_half"];
 
     id<MTLComputePipelineState> pipeline_naive =
         [device newComputePipelineStateWithFunction:func_naive
@@ -37,6 +43,23 @@ int main() {
     id<MTLComputePipelineState> pipeline_simdgroup =
         [device newComputePipelineStateWithFunction:func_simdgroup
                                              error:&error];
+    id<MTLComputePipelineState> pipeline_float4 =
+        [device newComputePipelineStateWithFunction:func_float4
+                                             error:&error];
+    id<MTLComputePipelineState> pipeline_cached =
+        [device newComputePipelineStateWithFunction:func_cached
+                                             error:&error];
+    id<MTLComputePipelineState> pipeline_half =
+        [device newComputePipelineStateWithFunction:func_half
+                                             error:&error];
+
+    if (!pipeline_naive)     { NSLog(@"ERROR: matvec_naive missing");     return 1; }
+    if (!pipeline_tiled)     { NSLog(@"ERROR: matvec_tiled missing");     return 1; }
+    if (!pipeline_coalesced) { NSLog(@"ERROR: matvec_coalesced missing"); return 1; }
+    if (!pipeline_simdgroup) { NSLog(@"ERROR: matvec_simdgroup missing"); return 1; }
+    if (!pipeline_float4)    { NSLog(@"ERROR: matvec_float4 missing");    return 1; }
+    if (!pipeline_cached)    { NSLog(@"ERROR: matvec_cached missing");    return 1; }
+    if (!pipeline_half)      { NSLog(@"ERROR: matvec_half missing");      return 1; }
 
     id<MTLCommandQueue> queue = [device newCommandQueue];
 
@@ -44,6 +67,7 @@ int main() {
     const uint K          = 2048;
     const uint TILE       = 64;
     const uint GROUP_SIZE = 256;
+    const int  REPS       = 100;
 
     std::vector<float> A(M * K), x(K), y_cpu(M);
     for (uint i = 0; i < M * K; i++) A[i] = (float)rand() / RAND_MAX;
@@ -55,9 +79,17 @@ int main() {
         y_cpu[i] = sum;
     }
 
+    std::vector<uint16_t> A_half(M * K);
+    for (uint i = 0; i < M * K; i++) {
+        A_half[i] = (uint16_t)(__fp16)A[i];
+    }
+    
     id<MTLBuffer> bufA = [device newBufferWithBytes:A.data()
                           length:M * K * sizeof(float)
                           options:MTLResourceStorageModeShared];
+    id<MTLBuffer> bufA_half = [device newBufferWithBytes:A_half.data()
+                               length:M * K * sizeof(uint16_t)
+                               options:MTLResourceStorageModeShared];
     id<MTLBuffer> bufX = [device newBufferWithBytes:x.data()
                           length:K * sizeof(float)
                           options:MTLResourceStorageModeShared];
@@ -67,6 +99,20 @@ int main() {
                           length:sizeof(uint)
                           options:MTLResourceStorageModeShared];
 
+    auto print_results = [&](NSString* name, double ms,
+                              double bytes_moved) {
+        double gbs = (bytes_moved / 1e9) / (ms / 1000.0);
+        float* result = (float*)bufY.contents;
+        float max_err = 0.0f;
+        for (uint i = 0; i < M; i++)
+            max_err = fmaxf(max_err, fabsf(result[i] - y_cpu[i]));
+        NSLog(@"\n--- %@ ---", name);
+        NSLog(@"  time:        %.4f ms",  ms);
+        NSLog(@"  bandwidth:   %.1f GB/s", gbs);
+        NSLog(@"  utilization: %.1f%%",   (gbs / 200.0) * 100.0);
+        NSLog(@"  max error:   %f",       max_err);
+    };
+
     auto benchmark = [&](id<MTLComputePipelineState> pipeline,
                          NSString* name,
                          int mode,
@@ -75,37 +121,28 @@ int main() {
         auto run_once = [&]() {
             id<MTLCommandBuffer> cmd = [queue commandBuffer];
             id<MTLComputeCommandEncoder> enc = [cmd computeCommandEncoder];
-
             [enc setComputePipelineState:pipeline];
             [enc setBuffer:bufA offset:0 atIndex:0];
             [enc setBuffer:bufX offset:0 atIndex:1];
             [enc setBuffer:bufY offset:0 atIndex:2];
             [enc setBuffer:bufK offset:0 atIndex:3];
-
             if (tg_memory_bytes > 0) {
                 [enc setThreadgroupMemoryLength:tg_memory_bytes
                                        atIndex:0];
             }
-
             MTLSize grid  = MTLSizeMake(M, 1, 1);
             MTLSize group = MTLSizeMake(GROUP_SIZE, 1, 1);
-
             if (mode == 0) {
-                [enc dispatchThreads:grid
-                    threadsPerThreadgroup:group];
+                [enc dispatchThreads:grid threadsPerThreadgroup:group];
             } else {
-                [enc dispatchThreadgroups:grid
-                     threadsPerThreadgroup:group];
+                [enc dispatchThreadgroups:grid threadsPerThreadgroup:group];
             }
-
             [enc endEncoding];
             [cmd commit];
             [cmd waitUntilCompleted];
         };
 
         for (int r = 0; r < 5; r++) run_once();
-
-        const int REPS = 100;
         auto t0 = std::chrono::high_resolution_clock::now();
         for (int r = 0; r < REPS; r++) run_once();
         auto t1 = std::chrono::high_resolution_clock::now();
@@ -113,18 +150,39 @@ int main() {
         double ms    = std::chrono::duration<double,
                        std::milli>(t1 - t0).count() / REPS;
         double bytes = (double)(M * K + K + M) * sizeof(float);
-        double gbs   = (bytes / 1e9) / (ms / 1000.0);
+        print_results(name, ms, bytes);
+    };
 
-        float* result = (float*)bufY.contents;
-        float max_err = 0.0f;
-        for (uint i = 0; i < M; i++)
-            max_err = fmaxf(max_err, fabsf(result[i] - y_cpu[i]));
+    auto benchmark_half = [&]() {
+        auto run_once = [&]() {
+            id<MTLCommandBuffer> cmd = [queue commandBuffer];
+            id<MTLComputeCommandEncoder> enc = [cmd computeCommandEncoder];
+            [enc setComputePipelineState:pipeline_half];
+            [enc setBuffer:bufA_half offset:0 atIndex:0];
+            [enc setBuffer:bufX      offset:0 atIndex:1];
+            [enc setBuffer:bufY      offset:0 atIndex:2];
+            [enc setBuffer:bufK      offset:0 atIndex:3];
+            [enc setThreadgroupMemoryLength:(GROUP_SIZE / 32) * sizeof(float)
+                                   atIndex:0];
+            MTLSize grid  = MTLSizeMake(M, 1, 1);
+            MTLSize group = MTLSizeMake(GROUP_SIZE, 1, 1);
+            [enc dispatchThreadgroups:grid threadsPerThreadgroup:group];
+            [enc endEncoding];
+            [cmd commit];
+            [cmd waitUntilCompleted];
+        };
 
-        NSLog(@"\n--- %@ ---", name);
-        NSLog(@"  time:        %.4f ms",  ms);
-        NSLog(@"  bandwidth:   %.1f GB/s", gbs);
-        NSLog(@"  utilization: %.1f%%",   (gbs / 200.0) * 100.0);
-        NSLog(@"  max error:   %f",       max_err);
+        for (int r = 0; r < 5; r++) run_once();
+        auto t0 = std::chrono::high_resolution_clock::now();
+        for (int r = 0; r < REPS; r++) run_once();
+        auto t1 = std::chrono::high_resolution_clock::now();
+
+        double ms = std::chrono::duration<double,
+                    std::milli>(t1 - t0).count() / REPS;
+        double bytes = (double)M * K * sizeof(uint16_t)
+                     + (double)K * sizeof(float)
+                     + (double)M * sizeof(float);
+        print_results(@"matvec_half", ms, bytes);
     };
 
     benchmark(pipeline_naive,
@@ -146,5 +204,18 @@ int main() {
               @"matvec_simdgroup",
               1,
               (GROUP_SIZE / 32) * sizeof(float));
+
+    benchmark(pipeline_float4,
+              @"matvec_float4",
+              1,
+              (GROUP_SIZE / 32) * sizeof(float));
+
+    benchmark(pipeline_cached,
+              @"matvec_cached",
+              1,
+              (K + GROUP_SIZE / 32) * sizeof(float));
+
+    benchmark_half();
+
     return 0;
 }

@@ -105,3 +105,120 @@ kernel void matvec_simdgroup(
         y[row] = total;
     }
 }
+
+kernel void matvec_float4(
+    device const float* A       [[ buffer(0) ]],
+    device const float* x       [[ buffer(1) ]],
+    device float*       y       [[ buffer(2) ]],
+    constant uint&      K       [[ buffer(3) ]],
+    threadgroup float*  partial [[ threadgroup(0) ]],
+    uint row      [[ threadgroup_position_in_grid ]],
+    uint local_id [[ thread_position_in_threadgroup ]],
+    uint gsize    [[ threads_per_threadgroup ]])
+{
+    device const float4* A4 = (device const float4*)(A + row * K);
+    device const float4* x4 = (device const float4*)x;
+    uint K4 = K / 4;
+
+
+    float4 acc = float4(0.0f);
+    for (uint j = local_id; j < K4; j += gsize) {
+        acc += A4[j] * x4[j];
+    }
+
+    float sum = acc.x + acc.y + acc.z + acc.w;
+
+    sum = simd_sum(sum);
+
+    if (local_id % 32 == 0) {
+        partial[local_id / 32] = sum;
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    if (local_id == 0) {
+        float total = 0.0f;
+        uint n_simds = gsize / 32;
+        for (uint i = 0; i < n_simds; i++) total += partial[i];
+        y[row] = total;
+    }
+}
+
+kernel void matvec_cached(
+    device const float* A       [[ buffer(0) ]],
+    device const float* x       [[ buffer(1) ]],
+    device float*       y       [[ buffer(2) ]],
+    constant uint&      K       [[ buffer(3) ]],
+    threadgroup float4* x_cache [[ threadgroup(0) ]],
+    uint row      [[ threadgroup_position_in_grid ]],
+    uint local_id [[ thread_position_in_threadgroup ]],
+    uint gsize    [[ threads_per_threadgroup ]])
+{
+    device const float4* A4 = (device const float4*)(A + row * K);
+    device const float4* x4 = (device const float4*)x;
+    uint K4 = K / 4;
+
+    for (uint j = local_id; j < K4; j += gsize) {
+        x_cache[j] = x4[j];
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    float4 acc = float4(0.0f);
+    for (uint j = local_id; j < K4; j += gsize) {
+        acc += A4[j] * x_cache[j];
+    }
+    float sum = acc.x + acc.y + acc.z + acc.w;
+
+    sum = simd_sum(sum);
+
+    threadgroup float* partial =
+        (threadgroup float*)(x_cache + K4);
+    
+    if (local_id % 32 == 0) {
+        partial[local_id / 32] = sum;
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    if (local_id == 0) {
+        float total = 0.0f;
+        uint n_simds = gsize / 32;
+        for (uint i = 0; i < n_simds; i++) total += partial[i];
+        y[row] = total;
+    }
+}
+
+kernel void matvec_half(
+    device const half*  A       [[ buffer(0) ]],
+    device const float* x       [[ buffer(1) ]],
+    device float*       y       [[ buffer(2) ]],
+    constant uint&      K       [[ buffer(3) ]],
+    threadgroup float*  partial [[ threadgroup(0) ]],
+    uint row      [[ threadgroup_position_in_grid ]],
+    uint local_id [[ thread_position_in_threadgroup ]],
+    uint gsize    [[ threads_per_threadgroup ]])
+{
+
+    device const half2* A2 = (device const half2*)(A + row * K);
+    uint K2 = K / 2;
+
+    float sum = 0.0f;
+    for (uint j = local_id; j < K2; j += gsize) {
+
+        float2 a = float2(A2[j]);
+        float2 v = float2(x[j*2], x[j*2 + 1]);
+        sum += a.x * v.x + a.y * v.y;
+    }
+
+    sum = simd_sum(sum);
+
+    if (local_id % 32 == 0) {
+        partial[local_id / 32] = sum;
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    if (local_id == 0) {
+        float total = 0.0f;
+        uint n_simds = gsize / 32;
+        for (uint i = 0; i < n_simds; i++) total += partial[i];
+        y[row] = total;
+    }
+}
