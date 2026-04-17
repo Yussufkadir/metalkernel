@@ -6,6 +6,11 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		99BD5A3C2F798FF70029DA28 /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 99BD5A3B2F798FF70029DA28 /* Metal.framework */; };
+		99BD5A3E2F79900E0029DA28 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 99BD5A3D2F79900E0029DA28 /* Foundation.framework */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXCopyFilesBuildPhase section */
 		99BD5A2A2F798D130029DA28 /* CopyFiles */ = {
 			isa = PBXCopyFilesBuildPhase;
@@ -20,6 +25,8 @@
 
 /* Begin PBXFileReference section */
 		99BD5A2C2F798D130029DA28 /* metalkernel */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = metalkernel; sourceTree = BUILT_PRODUCTS_DIR; };
+		99BD5A3B2F798FF70029DA28 /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
+		99BD5A3D2F79900E0029DA28 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = System/Library/Frameworks/Foundation.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -35,6 +42,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				99BD5A3E2F79900E0029DA28 /* Foundation.framework in Frameworks */,
+				99BD5A3C2F798FF70029DA28 /* Metal.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -46,6 +55,7 @@
 			children = (
 				99BD5A2E2F798D130029DA28 /* metalkernel */,
 				99BD5A2D2F798D130029DA28 /* Products */,
+				99BD5A3A2F798FF70029DA28 /* Frameworks */,
 			);
 			sourceTree = "<group>";
 		};
@@ -55,6 +65,15 @@
 				99BD5A2C2F798D130029DA28 /* metalkernel */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		99BD5A3A2F798FF70029DA28 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				99BD5A3D2F79900E0029DA28 /* Foundation.framework */,
+				99BD5A3B2F798FF70029DA28 /* Metal.framework */,
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
